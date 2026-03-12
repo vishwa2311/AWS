@@ -1,0 +1,89 @@
+#!/bin/bash
+
+CRI="unix:///run/containerd/containerd.sock"
+
+echo "======================================"
+echo "Kubernetes Cluster Doctor"
+echo "======================================"
+echo "Time: $(date)"
+echo
+
+echo "1. Checking swap..."
+if swapon --show | grep -q .; then
+    echo "Swap enabled -> disabling"
+    sudo swapoff -a
+    sudo sed -i '/swap/d' /etc/fstab
+else
+    echo "Swap already disabled"
+fi
+echo
+
+echo "2. Checking container runtime..."
+if ! systemctl is-active --quiet containerd; then
+    echo "containerd not running -> restarting"
+    sudo systemctl restart containerd
+else
+    echo "containerd running"
+fi
+echo
+
+echo "3. Checking kubelet..."
+if ! systemctl is-active --quiet kubelet; then
+    echo "kubelet stopped -> restarting"
+    sudo systemctl restart kubelet
+else
+    echo "kubelet running"
+fi
+echo
+
+echo "4. Checking control plane containers..."
+sudo crictl --runtime-endpoint $CRI ps | grep -E "etcd|kube-apiserver|kube-controller-manager|kube-scheduler"
+echo
+
+echo "5. Checking API server port..."
+if sudo ss -lntp | grep -q 6443; then
+    echo "API server port 6443 listening"
+else
+    echo "API server port not listening -> restarting kubelet"
+    sudo systemctl restart kubelet
+fi
+echo
+
+echo "6. Checking etcd..."
+if sudo ss -lntp | grep -q 2379; then
+    echo "etcd port active"
+else
+    echo "etcd not responding -> restarting kubelet"
+    sudo systemctl restart kubelet
+fi
+echo
+
+echo "7. Memory usage:"
+free -m
+echo
+
+echo "8. Checking OOM kills..."
+sudo dmesg | grep -i "killed process" | tail -5
+echo
+
+echo "9. Checking node status..."
+kubectl get nodes
+echo
+
+echo "10. Checking kube-system pods..."
+kubectl get pods -n kube-system
+echo
+
+echo "11. Detecting NotReady nodes..."
+NOTREADY=$(kubectl get nodes | grep NotReady)
+
+if [ -n "$NOTREADY" ]; then
+    echo "Detected NotReady node(s)"
+    echo "$NOTREADY"
+    echo "Attempting kubelet restart on worker nodes..."
+fi
+
+echo
+echo "======================================"
+echo "Cluster Doctor Completed"
+echo "======================================"
