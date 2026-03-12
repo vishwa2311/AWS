@@ -1,0 +1,216 @@
+#!/bin/bash
+
+CRI="unix:///run/containerd/containerd.sock"
+DATE=$(date +%F_%H-%M-%S)
+REPORT="/tmp/k8s_blackbox_report_$DATE.log"
+
+exec > >(tee -a $REPORT) 2>&1
+
+echo "================================================="
+echo "KUBERNETES BLACKBOX DOCTOR"
+echo "================================================="
+echo "Time: $(date)"
+echo "Report: $REPORT"
+echo
+
+###################################################
+echo "SECTION 1 — SYSTEM HEALTH"
+###################################################
+
+echo "--- Host uptime ---"
+uptime
+echo
+
+echo "--- CPU load ---"
+cat /proc/loadavg
+echo
+
+echo "--- Memory ---"
+free -m
+echo
+
+echo "--- Swap ---"
+swapon --show
+echo
+
+if swapon --show | grep -q .; then
+ echo "Swap detected → disabling"
+ sudo swapoff -a
+fi
+
+echo
+echo "--- Disk ---"
+df -h
+echo
+
+echo "--- OOM kills ---"
+sudo dmesg | grep -i "killed process" | tail -10
+echo
+
+###################################################
+echo "SECTION 2 — CRITICAL SERVICES"
+###################################################
+
+check_service() {
+ SERVICE=$1
+ if systemctl is-active --quiet $SERVICE; then
+   echo "$SERVICE running"
+ else
+   echo "$SERVICE NOT running → restarting"
+   sudo systemctl restart $SERVICE
+ fi
+}
+
+check_service containerd
+check_service kubelet
+
+echo
+echo "--- Service status ---"
+systemctl status kubelet | head -10
+echo
+
+###################################################
+echo "SECTION 3 — CONTROL PLANE CONTAINERS"
+###################################################
+
+sudo crictl --runtime-endpoint $CRI ps
+
+echo
+echo "--- Historical containers ---"
+sudo crictl --runtime-endpoint $CRI ps -a | head -20
+
+###################################################
+echo "SECTION 4 — API SERVER CHECK"
+###################################################
+
+if sudo ss -lntp | grep -q 6443; then
+ echo "API server port 6443 listening"
+else
+ echo "API server NOT responding"
+ echo "Restarting kubelet"
+ sudo systemctl restart kubelet
+ sleep 5
+fi
+
+###################################################
+echo "SECTION 5 — ETCD HEALTH"
+###################################################
+
+if sudo ss -lntp | grep -q 2379; then
+ echo "etcd port active"
+else
+ echo "etcd not responding"
+ sudo systemctl restart kubelet
+fi
+
+###################################################
+echo "SECTION 6 — CONTROL PLANE LOOP DETECTION"
+###################################################
+
+APILOOPS=$(sudo crictl --runtime-endpoint $CRI ps -a | grep kube-apiserver | wc -l)
+
+if [ "$APILOOPS" -gt 5 ]; then
+ echo "WARNING: API server restart loop suspected"
+fi
+
+ETCDLOOPS=$(sudo crictl --runtime-endpoint $CRI ps -a | grep etcd | wc -l)
+
+if [ "$ETCDLOOPS" -gt 5 ]; then
+ echo "WARNING: etcd restart loop suspected"
+fi
+
+###################################################
+echo "SECTION 7 — NETWORK HEALTH"
+###################################################
+
+ip addr
+echo
+
+echo "--- Routing ---"
+ip route
+echo
+
+###################################################
+echo "SECTION 8 — KUBECTL ACCESS"
+###################################################
+
+kubectl get nodes >/dev/null 2>&1
+
+if [ $? -eq 0 ]; then
+ echo "kubectl working"
+else
+ echo "kubectl cannot reach API server"
+fi
+
+###################################################
+echo "SECTION 9 — NODE HEALTH"
+###################################################
+
+kubectl get nodes 2>/dev/null || echo "Cannot fetch nodes"
+
+echo
+echo "--- Node description ---"
+NODE=$(hostname)
+
+kubectl describe node $NODE 2>/dev/null | head -20
+
+###################################################
+echo "SECTION 10 — SYSTEM POD HEALTH"
+###################################################
+
+kubectl get pods -n kube-system 2>/dev/null
+
+###################################################
+echo "SECTION 11 — CRASHED POD DETECTION"
+###################################################
+
+CRASHED=$(kubectl get pods -n kube-system 2>/dev/null | grep -E "CrashLoopBackOff|Error")
+
+if [ -n "$CRASHED" ]; then
+ echo "Crashed pods detected:"
+ echo "$CRASHED"
+fi
+
+###################################################
+echo "SECTION 12 — AUTO HEAL CRASHED PODS"
+###################################################
+
+kubectl get pods -n kube-system 2>/dev/null | grep CrashLoopBackOff | awk '{print $1}' | while read pod
+do
+ echo "Restarting pod: $pod"
+ kubectl delete pod $pod -n kube-system
+done
+
+###################################################
+echo "SECTION 13 — CNI HEALTH"
+###################################################
+
+kubectl get pods -n kube-system 2>/dev/null | grep calico
+
+CNI_FAIL=$(kubectl get pods -n kube-system 2>/dev/null | grep calico | grep -E "Error|CrashLoopBackOff")
+
+if [ -n "$CNI_FAIL" ]; then
+ echo "CNI failure detected"
+ kubectl delete pod -n kube-system -l k8s-app=calico-node
+ kubectl delete pod -n kube-system -l k8s-app=calico-kube-controllers
+fi
+
+###################################################
+echo "SECTION 14 — STORAGE"
+###################################################
+
+kubectl get pv 2>/dev/null
+kubectl get pvc -A 2>/dev/null
+
+###################################################
+echo "SECTION 15 — FINAL CLUSTER SNAPSHOT"
+###################################################
+
+kubectl get nodes 2>/dev/null
+kubectl get pods -A 2>/dev/null | head -20
+
+echo
+echo "================================================="
+echo "BLACKBOX DIAGNOSIS COMPLETE"
+echo "Report saved to $REPORT"
+echo "================================================="
