@@ -1,0 +1,113 @@
+#!/bin/bash
+
+echo "🚀 Starting VRK Cloud Academy Setup..."
+
+# Update system
+yum update -y
+
+# Install NGINX
+amazon-linux-extras install nginx1 -y
+
+# Start & Enable NGINX
+systemctl start nginx
+systemctl enable nginx
+
+# Deploy Professional Dashboard
+cat << 'EOF' > /usr/share/nginx/html/index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VRK Cloud Academy</title>
+<style>
+body {
+  margin: 0;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: #0B1F3A;
+  color: #ffffff;
+}
+
+.container {
+  text-align: center;
+  padding: 80px 20px;
+}
+
+h1 {
+  font-size: 42px;
+  margin-bottom: 10px;
+  color: #4FC3F7;
+}
+
+h2 {
+  font-weight: 300;
+  margin-bottom: 30px;
+  color: #B0BEC5;
+}
+
+.card {
+  background: #132F4C;
+  margin: 20px auto;
+  padding: 25px;
+  border-radius: 12px;
+  width: 80%;
+  max-width: 700px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+
+.badge {
+  display: inline-block;
+  background: #00C853;
+  color: #000;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-weight: bold;
+  margin-bottom: 20px;
+}
+
+.footer {
+  margin-top: 60px;
+  font-size: 14px;
+  color: #90A4AE;
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<div class="badge">LIVE • PRODUCTION READY</div>
+
+<h1>🚀 VRK Cloud Academy</h1>
+<h2>Cloud • DevOps • Real-World Engineering</h2>
+
+<div class="card">
+  <h3>Deployment Status</h3>
+  <p>Successfully deployed on <b>Amazon EC2 (Linux)</b></p>
+  <p>Nginx Web Server is up and running</p>
+</div>
+
+<div class="card">
+  <h3>Real DevOps Learning</h3>
+  <p>Hands-on AWS Projects</p>
+  <p>CI/CD Pipelines • Kubernetes • Infrastructure as Code</p>
+</div>
+
+<div class="card">
+  <h3>Enterprise-Ready Skills</h3>
+  <p>Architecture Thinking • Automation • Cloud Governance</p>
+</div>
+
+<div class="footer">
+  © 2026 VRK Cloud Academy • Learn • Practice • Succeed
+</div>
+
+</div>
+</body>
+</html>
+EOF
+
+# Restart NGINX
+systemctl restart nginx
+
+echo "✅ Setup Complete!"
+echo "🌐 Open your EC2 Public IP in browser"
