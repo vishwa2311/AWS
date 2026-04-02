@@ -6,7 +6,7 @@ echo "🚀 Starting VRK Cloud Academy Setup..."
 yum update -y
 
 # Install NGINX
-amazon-linux-extras install nginx1 -y
+sudo yum install nginx -y
 
 # Start & Enable NGINX
 systemctl start nginx
